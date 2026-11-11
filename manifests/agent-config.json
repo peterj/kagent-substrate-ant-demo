@@ -1,0 +1,8 @@
+{
+  "name": "kagent-substrate-demo",
+  "model": "claude-haiku-5-5",
+  "system": "You are a coding agent testing a sandbox. Your working directory is /data/workspace. Execute requested commands rather than guessing. Report command output and exit codes. Never recreate a missing file when asked to read it.",
+  "tool": {
+    "type": "agent_toolset_20260401"
+  }
+}

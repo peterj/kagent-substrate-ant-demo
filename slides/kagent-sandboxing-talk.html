@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lessons learned sandboxing agents with kagent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme: dark;
+  --ink:#0A0D0F;
+  --panel:#101518;
+  --panel-2:#0E1A12;
+  --line:#1F3A24;
+  --green:#56FD5A;
+  --green-soft:rgba(86,253,90,.14);
+  --text:#FFFFFF;
+  --muted:#A9B0BC;
+  --dim:#1E252E;
+  --sans:"Ubuntu", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono:"Ubuntu Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ease:cubic-bezier(.2,.7,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--ink);color:var(--text);font-family:var(--sans);overflow:hidden}
+body{-webkit-font-smoothing:antialiased}
+
+/* ---------- stage ---------- */
+#viewport{position:fixed;inset:0;display:grid;place-items:center}
+#stage{position:relative;width:1600px;height:900px;transform-origin:center center;flex:none}
+.slide{position:absolute;inset:0;padding:84px 104px 90px;display:flex;flex-direction:column;
+  opacity:0;visibility:hidden;transform:translateX(48px);
+  transition:opacity .55s var(--ease),transform .7s var(--ease),visibility 0s linear .7s;overflow:hidden}
+.slide.before{transform:translateX(-48px)}
+.slide.active{opacity:1;visibility:visible;transform:none;transition:opacity .55s var(--ease),transform .7s var(--ease),visibility 0s}
+/* the template's corner arcs: one static layer behind all slides */
+#stage::before,#stage::after{content:"";position:absolute;border-radius:50%;pointer-events:none;z-index:0}
+#stage::after{right:-230px;bottom:-270px;width:540px;height:540px;border:2px solid rgba(86,253,90,.28)}
+#stage::before{right:-330px;bottom:-370px;width:740px;height:740px;border:2px solid rgba(86,253,90,.12)}
+.slide{z-index:1}
+
+/* staggered reveal: one orchestrated entrance per slide */
+[data-r]{opacity:0;filter:blur(6px);transition:opacity .5s var(--ease),filter .6s var(--ease)}
+.slide.active [data-r]{opacity:1;filter:none;transition-delay:calc(var(--i,0) * 80ms + 120ms)}
+
+/* ---------- type ---------- */
+h1{font-size:92px;line-height:1.02;font-weight:700;letter-spacing:-.025em}
+h2{font-size:56px;line-height:1.08;font-weight:700;letter-spacing:-.02em;max-width:1240px}
+.kicker{color:var(--green);font-size:22px;font-weight:500;letter-spacing:.01em;margin-bottom:22px}
+.sub{color:var(--muted);font-size:24px;line-height:1.4}
+.big{font-size:30px;font-weight:700}
+.mono{font-family:var(--mono)}
+.green{color:var(--green)}
+.muted{color:var(--muted)}
+.body{flex:1;display:flex;flex-direction:column;justify-content:center;gap:34px;padding-top:28px}
+.row{display:flex;gap:28px;align-items:stretch}
+.grow{flex:1}
+.verdict{font-size:30px;font-weight:700;color:var(--green);text-align:center}
+.tag{position:absolute;top:92px;right:104px;font-size:18px;font-weight:700;color:var(--green);
+  border:1.5px solid var(--green);border-radius:10px;padding:8px 14px}
+
+/* ---------- surfaces ---------- */
+.card{background:var(--panel);border:1.5px solid var(--line);border-radius:22px;padding:34px 36px}
+.card.hl{border-color:var(--green);box-shadow:0 0 0 6px var(--green-soft)}
+.card h3{font-size:32px;font-weight:700;margin-bottom:18px}
+.card .h3g{color:var(--green)}
+.card .label{color:var(--muted);font-size:18px;margin-bottom:10px}
+.guard{background:var(--panel-2);border:1.5px dashed var(--green);border-radius:16px;padding:20px 22px;
+  font-size:24px;text-align:center;line-height:1.3}
+.chip{background:var(--panel);border:1.5px solid var(--green);border-radius:12px;padding:16px 18px;font-size:22px;text-align:center}
+ul.ticks{list-style:none;display:grid;gap:18px;font-size:28px;line-height:1.3}
+ul.ticks li{display:grid;grid-template-columns:30px 1fr;gap:12px}
+ul.ticks li::before{content:"+";color:var(--green);font-weight:700}
+ul.ticks.minus li::before{content:"\2013";color:var(--muted)}
+
+/* arrows */
+.arrow{flex:none;align-self:center;width:46px;height:2px;background:var(--muted);position:relative}
+.arrow::after{content:"";position:absolute;right:-1px;top:-6px;border:7px solid transparent;border-left:11px solid var(--muted);border-right:0}
+.arrow.g{background:var(--green)}
+.arrow.g::after{border-left-color:var(--green)}
+.flow{background:repeating-linear-gradient(90deg,var(--green) 0 10px,transparent 10px 18px);background-size:18px 2px;animation:dash 1s linear infinite}
+@keyframes dash{to{background-position:18px 0}}
+
+/* ---------- title slide ---------- */
+.title-wrap{display:grid;grid-template-columns:1.05fr .95fr;gap:40px;height:100%;align-items:center}
+.speaker{margin-top:44px;color:var(--green);font-size:24px;font-weight:500}
+#field{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;padding:10px}
+#field i{aspect-ratio:1;border-radius:8px;background:var(--dim);transition:background .9s var(--ease),box-shadow .9s var(--ease)}
+#field i.on{background:var(--green);box-shadow:0 0 22px rgba(86,253,90,.45)}
+
+/* ---------- specific slides ---------- */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
+.four{display:grid;grid-template-columns:repeat(4,1fr);gap:24px}
+.word-grid .card{display:flex;align-items:flex-end;min-height:190px}
+.word-grid .card span{font-size:44px;font-weight:700;letter-spacing:-.01em}
+.who .card{min-height:200px;display:flex;flex-direction:column;justify-content:flex-end}
+.who .card .name{font-size:32px;font-weight:700;white-space:nowrap}
+.reason h3{margin-bottom:10px}
+
+.era .card{display:flex;flex-direction:column;gap:12px}
+.era .card .name{font-size:42px;font-weight:700}
+.era .card .label{margin:0}
+
+/* substrate diagram */
+.sub-diagram{position:relative;background:rgba(16,21,24,.55);border:1.5px dashed #2a3a30;border-radius:22px;padding:44px 40px 40px}
+.node{background:var(--panel);border:1.5px solid var(--line);border-radius:16px;padding:22px 26px;font-size:28px;font-weight:700;text-align:center;min-width:150px}
+.note{font-size:21px;color:var(--green);text-align:center;margin-top:12px;font-weight:500}
+.pool{border:1.5px solid var(--green);border-radius:18px;padding:18px 22px;background:var(--panel)}
+.pool .label,.store .label{font-size:18px;font-weight:700;margin-bottom:14px}
+.pool .label{color:var(--green)}
+.store .label{color:var(--muted)}
+.slots{display:grid;grid-template-columns:repeat(6,34px);gap:12px}
+.slots i{width:34px;height:34px;border-radius:8px;border:1.5px solid var(--line)}
+.slots i.on{background:var(--green);border-color:var(--green)}
+.store{border:1.5px solid var(--line);border-radius:18px;padding:18px 22px;background:var(--panel)}
+.store .slots{grid-template-columns:repeat(9,30px);gap:10px}
+.store .slots i{width:30px;height:30px;background:var(--dim);border:0;transition:background .6s,box-shadow .6s}
+.store .slots i.wake{background:var(--green);box-shadow:0 0 18px rgba(86,253,90,.5)}
+.vert{display:flex;justify-content:center;gap:120px;height:58px;align-items:center}
+.vline{position:relative;width:2px;height:46px;background:var(--muted)}
+.vline.up{background:var(--green)}
+.vline::after{content:"";position:absolute;left:-6px;border:7px solid transparent}
+.vline.down::after{bottom:-2px;border-top:11px solid var(--muted);border-bottom:0}
+.vline.up::after{top:-2px;border-bottom:11px solid var(--green);border-top:0}
+.vlabel{font-size:21px;display:flex;align-items:center;gap:14px}
+
+/* step columns (slides 11 + 13) */
+.steps{display:grid;grid-template-columns:1fr 46px 1fr 46px 1fr;align-items:start;row-gap:22px}
+.steps .h{font-size:26px;font-weight:700;color:var(--green)}
+.steps .card{text-align:center;padding:38px 24px}
+.steps .card .name{font-size:38px;font-weight:700;margin-bottom:8px}
+.steps .card .s{font-size:24px;color:var(--muted)}
+.steps .arrow{margin-top:70px}
+
+/* A2A */
+.boxes .node{flex:1}
+.node .s{display:block;font-size:22px;font-weight:400;color:var(--muted);margin-top:8px}
+.lifecycle{display:grid;grid-template-columns:1fr 30px 1fr 30px 1fr 30px 1fr;align-items:center}
+.lifecycle .arrow{width:30px}
+
+/* table */
+table{border-collapse:collapse;width:100%;font-size:28px}
+th{text-align:left;color:var(--green);font-size:22px;font-weight:700;padding:0 0 18px}
+td{padding:22px 0;border-top:1.5px solid var(--line)}
+td:first-child{font-weight:700;width:36%;padding-right:30px}
+
+/* lessons */
+.lesson{justify-content:center}
+.lesson .n{font-size:240px;line-height:.9;font-weight:700;color:var(--green);letter-spacing:-.04em;
+  clip-path:inset(0 100% 0 0);transition:clip-path .9s var(--ease) .1s}
+.slide.active.lesson .n{clip-path:inset(0 0 0 0)}
+.lesson h2{margin-top:30px;font-size:62px;max-width:1300px}
+.lesson .sub{margin-top:22px;font-size:30px;max-width:1200px}
+ol.lessons{list-style:none;display:grid;gap:22px;font-size:34px;counter-reset:l}
+ol.lessons li{counter-increment:l;display:grid;grid-template-columns:76px 1fr;align-items:baseline}
+ol.lessons li::before{content:counter(l,decimal-leading-zero);color:var(--green);font-weight:700}
+
+/* ---------- lessons ---------- */
+.lz{padding-top:64px}
+.track{display:flex;align-items:center;gap:8px;margin-bottom:22px;font-size:20px;color:var(--muted)}
+.track span{margin-right:12px}
+.track i{width:46px;height:6px;border-radius:3px;background:var(--dim)}
+.track i.done{background:#2d6a33}
+.track i.on{background:var(--green)}
+.lz h2{font-size:54px;max-width:1400px}
+.lz .cols{flex:1;display:grid;grid-template-columns:590px 1fr;gap:54px;align-items:center;padding-top:16px}
+.beats{display:grid;gap:26px}
+.beat .k{font-size:19px;font-weight:700;color:var(--muted);margin-bottom:6px}
+.beat.now .k{color:var(--green)}
+.beat .t{font-size:25px;line-height:1.38}
+.know{border:1.5px dashed var(--line);border-radius:14px;padding:14px 18px;font-size:20px;color:var(--muted);line-height:1.4}
+.know b{display:block;color:var(--text);font-size:17px;margin-bottom:4px}
+.dia{background:rgba(16,21,24,.6);border:1.5px solid var(--line);border-radius:22px;padding:34px 32px;min-height:450px;
+  display:flex;flex-direction:column;justify-content:center;gap:16px}
+.dia .node{font-size:23px;min-width:0;padding:16px 16px}
+.dia .node .s{font-size:17px}
+.dia .cap{font-size:18px;color:var(--muted)}
+.dia .cap.gap{margin-top:22px}
+.dia .cap.center{text-align:center;margin-top:10px}
+.lrow{display:flex;align-items:center;gap:12px}
+.lrow .node{flex:1}
+.lrow .arrow{width:30px}
+.node.lost{border-style:dashed;color:var(--muted)}
+.node.hlnode{border-color:var(--green)}
+@keyframes snapglow{0%,100%{box-shadow:none;border-color:var(--line)}50%{box-shadow:0 0 26px rgba(86,253,90,.4);border-color:var(--green)}}
+.slide.active .snap{animation:snapglow 2.6s var(--ease) infinite}
+.l2{display:flex;align-items:center;gap:12px}
+.l2 .arrow{width:30px}
+.box-in{border:1.5px dashed var(--muted);border-radius:16px;padding:12px}
+.box-in .cap{font-size:15px;margin-bottom:8px}
+.gw{flex:none}
+.dest{list-style:none;display:grid;gap:10px;flex:1}
+.dest li{background:var(--panel);border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;font-size:19px;display:grid;grid-template-columns:20px 1fr;column-gap:8px}
+.dest li::before{content:"✓";color:var(--green);font-weight:700}
+.dest li.no{border-style:dashed;color:var(--muted)}
+.dest li.no::before{content:"✕";color:var(--muted)}
+.dest em{font-style:normal;color:var(--muted);font-size:15px;grid-column:2}
+.l2 .node{font-size:21px;padding:14px 12px}
+.pod{border:1.5px solid var(--line);border-radius:20px;padding:24px 26px 34px;background:var(--panel)}
+.pod .cap{margin-bottom:22px}
+.idcard{max-width:420px;margin:0 auto;font-size:30px !important;transition:opacity .35s,transform .35s var(--ease)}
+.idcard.swap{opacity:0;transform:translateY(8px)}
+.l4{display:flex;align-items:center;gap:20px}
+.snapfile{flex:1;border:1.5px solid var(--line);border-radius:16px;padding:18px 20px;background:var(--panel)}
+.snapfile ul{list-style:none;display:grid;gap:10px;font-size:21px;margin-top:10px}
+.snapfile li::before{content:"";display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--green);margin-right:12px;vertical-align:2px}
+.bucket{flex:1.25;border:1.5px solid var(--green);border-radius:18px;padding:18px 20px;background:var(--panel)}
+.bucket .bt{font-size:23px;font-weight:700;margin-bottom:12px}
+.bsq{display:grid;grid-template-columns:repeat(8,1fr);gap:7px;margin-bottom:14px}
+.bsq i{aspect-ratio:1;border-radius:5px;background:var(--dim)}
+.reqs{display:flex;flex-wrap:wrap;gap:8px}
+.reqs span{border:1.5px solid var(--green);border-radius:9px;padding:6px 10px;font-size:16px}
+.l5{display:flex;align-items:center;gap:26px}
+.snapcol{display:grid;gap:12px;flex:1}
+.paths{display:grid;gap:26px;flex:1.3}
+.path{display:flex;align-items:center;gap:12px}
+.path .arrow{width:46px}
+.path .node{flex:1}
+.path b{font-size:28px}
+.path.ok b{color:var(--green)}
+.path.no b{color:var(--muted)}
+ol.lessons li[data-go]{cursor:pointer}
+ol.lessons li[data-go]:hover{color:var(--green)}
+
+/* ---------- five lessons on one slide ---------- */
+.stepped{padding-top:60px}
+.ltabs{display:flex;gap:12px;margin-bottom:26px}
+.ltab{background:transparent;border:1.5px solid var(--line);border-radius:12px;color:var(--muted);font:inherit;font-size:20px;
+  padding:10px 16px;cursor:pointer;transition:border-color .35s,color .35s,background .35s}
+.ltab b{color:var(--green);margin-right:10px}
+.ltab.done{color:#cfd4db}
+.ltab.cur{border-color:var(--green);color:var(--text);background:var(--green-soft)}
+.ltab:hover{border-color:var(--green)}
+.lsteps{position:relative;flex:1}
+.step{position:absolute;inset:0;display:flex;flex-direction:column;opacity:0;visibility:hidden;
+  transition:opacity .3s var(--ease),visibility 0s linear .3s}
+.step.cur{opacity:1;visibility:visible;transition:opacity .3s var(--ease)}
+.step [data-s]{opacity:0;filter:blur(6px);transform:translateX(22px);
+  transition:opacity .45s var(--ease),filter .5s var(--ease),transform .55s var(--ease)}
+.slide.active .step.cur [data-s]{opacity:1;filter:none;transform:none;transition-delay:calc(var(--i,0) * 70ms + 60ms)}
+.still .step,.still .step [data-s]{transition:none !important}
+.still .step.cur [data-s]{opacity:1;filter:none;transform:none}
+/* demo tee-up */
+.dname{font-size:34px;font-weight:700;margin:6px 0 8px}
+.watch{color:var(--muted);font-size:20px;margin-bottom:14px}
+.live{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--green);margin-right:14px;vertical-align:1px}
+@keyframes live{0%{box-shadow:0 0 0 0 rgba(86,253,90,.6)}70%,100%{box-shadow:0 0 0 12px rgba(86,253,90,0)}}
+.slide.active .live{animation:live 1.6s ease-out infinite}
+
+/* ---------- flow diagrams (slides 11 and 13) ---------- */
+.flowbox{position:relative;width:1392px;height:560px;margin-top:6px}
+.flowbox > *{position:absolute}
+.fh{top:0;font-size:24px;font-weight:700;color:var(--green)}
+.fc{background:var(--panel);border:1.5px solid var(--line);border-radius:20px;padding:22px 28px;display:flex;flex-direction:column;justify-content:center;z-index:1}
+.fc.hlc{border-color:var(--green)}
+.fc .own{font-size:18px;color:var(--muted);margin-bottom:6px}
+.fc .nm{font-size:36px;font-weight:700}
+.fc .ds{font-size:21px;color:var(--muted);margin-top:6px}
+.fc .way{font-size:22px;margin-top:12px;color:var(--text)}
+.fc .way span{font-family:var(--sans);color:var(--muted);font-size:19px}
+.fl{font-size:20px;color:var(--muted)}
+.actor{left:1000px;width:392px;height:72px;background:var(--panel);border:1.5px solid var(--green);border-radius:16px;
+  display:flex;align-items:center;gap:16px;padding:0 22px;font-size:24px;z-index:1}
+.actor i{width:26px;height:26px;border-radius:7px;background:var(--green);flex:none}
+.actor em{margin-left:auto;font-style:normal;font-size:18px;color:var(--muted)}
+.actor.idle{border-color:var(--line);color:var(--muted)}
+.actor.idle i{background:var(--dim)}
+.sbx{left:1000px;width:392px;height:84px;background:var(--panel);border:1.5px solid var(--line);border-radius:16px;padding:14px 20px;z-index:1}
+.sbx p{font-size:22px}
+.sbx p span{color:var(--muted);font-size:19px;margin-left:6px}
+.ttl{height:6px;border-radius:3px;background:var(--dim);margin-top:12px;overflow:hidden}
+.ttl i{display:block;height:100%;width:100%;background:var(--green);transform-origin:left;animation:ttl 9s linear infinite}
+@keyframes ttl{from{transform:scaleX(1)}to{transform:scaleX(.04)}}
+.wires{position:absolute;left:0;top:0;width:1392px;height:560px;z-index:0;overflow:visible}
+.wires path{fill:none;stroke:var(--green);stroke-width:2.5;stroke-dasharray:700;stroke-dashoffset:700;transition:stroke-dashoffset 1s var(--ease)}
+.slide.active .wires path{stroke-dashoffset:0;transition-delay:.9s}
+.slide.active .wires path:nth-child(3){transition-delay:1.15s}
+.slide.active .wires path:nth-child(4){transition-delay:1.4s}
+.slide.active .wires path:nth-child(5),.slide.active .wires path:nth-child(6),.slide.active .wires path:nth-child(7){transition-delay:1.65s}
+.still .wires path{transition:none;stroke-dashoffset:0}
+
+/* ---------- chrome ---------- */
+#progress{position:fixed;left:0;top:0;height:3px;background:var(--green);width:0;transition:width .5s var(--ease);z-index:5}
+#hud{position:fixed;right:22px;bottom:18px;display:flex;align-items:center;gap:8px;z-index:5;
+  transition:opacity .4s;font-size:15px;color:var(--muted)}
+#hud.idle{opacity:0}
+#hud button{background:rgba(16,21,24,.85);border:1px solid var(--line);color:var(--text);width:38px;height:38px;
+  border-radius:10px;font:inherit;font-size:18px;cursor:pointer}
+#hud button:hover{border-color:var(--green)}
+#hud .count{min-width:64px;text-align:center;font-variant-numeric:tabular-nums}
+button:focus-visible,#overview a:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+#overview{position:fixed;inset:0;background:rgba(10,13,15,.96);z-index:10;display:none;padding:56px 64px;overflow:auto}
+#overview.open{display:block}
+#overview h4{font-size:20px;color:var(--muted);font-weight:500;margin-bottom:24px}
+#overview .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+#overview a{display:block;background:var(--panel);border:1.5px solid var(--line);border-radius:14px;padding:18px 20px;
+  color:var(--text);text-decoration:none;font-size:17px;line-height:1.35;min-height:96px}
+#overview a b{display:block;color:var(--green);font-size:14px;margin-bottom:8px}
+#overview a.cur{border-color:var(--green)}
+#overview a:hover{border-color:var(--green)}
+#help{position:fixed;left:22px;bottom:20px;font-size:14px;color:var(--muted);z-index:5;transition:opacity .4s}
+#help.idle{opacity:0}
+
+/* ---------- the fun, kept small ---------- */
+/* title: actors wake when you point at them */
+#field i{cursor:default}
+/* sandbox dimensions: hover or tap a word for what it means */
+.word-grid .card{flex-direction:column;justify-content:flex-end;align-items:flex-start;cursor:pointer;transition:border-color .3s}
+.flip .more{font-size:22px;color:var(--muted);line-height:1.35;max-height:0;opacity:0;overflow:hidden;
+  transition:max-height .45s var(--ease),opacity .35s,margin .45s}
+.flip:hover,.flip.open,.flip:focus-visible{border-color:var(--green)}
+.flip:hover .more,.flip.open .more,.flip:focus-visible .more{max-height:120px;opacity:1;margin-top:12px}
+/* verdicts land with a small stamp once the cards are in */
+.slide .verdict[data-r]{transform:scale(1.14)}
+.slide.active .verdict[data-r]{transform:none;transition:opacity .35s,filter .35s,transform .6s cubic-bezier(.3,1.7,.5,1);transition-delay:.85s}
+/* the actor card pings when it arrives */
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(86,253,90,.55)}100%{box-shadow:0 0 0 30px rgba(86,253,90,0)}}
+.slide.active .ping{animation:ping 1.3s var(--ease) 1.2s 2}
+/* configure > compile > converse: each stage lights up in turn */
+@keyframes pass{0%,100%{border-color:var(--line);box-shadow:none}35%{border-color:var(--green);box-shadow:0 0 34px rgba(86,253,90,.35)}}
+.slide.active .steps .card{animation:pass 1.1s var(--ease) var(--d) 1}
+/* A2A: the lifecycle plays through, pausing on the human */
+.lifecycle .node{transition:border-color .35s,box-shadow .35s,color .35s}
+.lifecycle .node.now{border-color:var(--green);box-shadow:0 0 0 6px var(--green-soft)}
+@keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+.lifecycle .node.now .dots::after{content:"";animation:dots 1.2s steps(1) infinite}
+/* last slide: a checklist you can actually tick */
+tbody tr{cursor:pointer}
+td:first-child::before{content:"";display:inline-block;width:26px;height:26px;border:2px solid var(--line);border-radius:7px;
+  margin-right:18px;vertical-align:-5px;text-align:center;font-size:19px;line-height:23px;color:var(--ink);
+  transition:background .25s,border-color .25s,transform .35s cubic-bezier(.3,1.7,.5,1)}
+tbody tr:hover td:first-child::before{border-color:var(--green)}
+tr.done td:first-child::before{content:"\2713";background:var(--green);border-color:var(--green);transform:scale(1.12)}
+tr.done td:last-child{color:var(--muted)}
+
+@media (prefers-reduced-motion: reduce){
+  .step [data-s],.slide.active .step.cur [data-s]{transition:none !important}
+  .wires path{transition:none !important;stroke-dashoffset:0 !important}
+  .ttl i{animation:none}
+  .slide.active .live,.slide.active .snap,.slide.active .ping,.slide.active .steps .card,.lifecycle .node.now .dots::after{animation:none}
+  .slide,.slide.active,[data-r],.slide.active [data-r],.lesson .n{transition:none !important}
+  .flow{animation:none}
+  #field i,.store .slots i{transition:none}
+}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div id="viewport"><div id="stage">
+
+<!-- 1 -->
+<section class="slide" data-title="Lessons learned sandboxing agents with kagent">
+  <div class="title-wrap">
+    <div>
+      <h1 data-r>Lessons learned sandboxing agents with kagent</h1>
+      <p class="speaker" data-r>Eitan Yarmush and Peter Jausovec, Solo.io</p>
+    </div>
+    <div id="field" data-r aria-hidden="true"></div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section class="slide" data-title="Is an agent a normal K8s workload?">
+  <h2 data-r>Is an agent a normal K8s workload?</h2>
+  <div class="body">
+    <div class="two">
+      <div class="card" data-r><h3 class="h3g">It looks like one</h3>
+        <ul class="ticks"><li>Compute and identity</li><li>Networking and storage</li><li>A lifecycle</li></ul></div>
+      <div class="card hl" data-r><h3 class="h3g">It doesn’t behave like one</h3>
+        <ul class="ticks"><li>Long-lived, stateful sessions</li><li>Bursty, mostly idle</li><li>Acts with the user’s authority</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="slide" data-title="A sandbox decides what an agent can see, touch, call, and persist">
+  <h2 data-r>A sandbox decides what an agent can see, touch, call, and persist</h2>
+  <div class="body">
+    <div class="three word-grid">
+      <div class="card flip" data-r tabindex="0" role="button" aria-expanded="false"><span>Filesystem</span><p class="more">What it reads, writes, and keeps after the session</p></div>
+      <div class="card flip" data-r tabindex="0" role="button" aria-expanded="false"><span>Network</span><p class="more">Where it can connect, down to methods and paths</p></div>
+      <div class="card flip" data-r tabindex="0" role="button" aria-expanded="false"><span>Tools</span><p class="more">Which binaries, MCP servers, and APIs it may call</p></div>
+      <div class="card flip" data-r tabindex="0" role="button" aria-expanded="false"><span>Credentials</span><p class="more">Secrets it uses, ideally without holding them</p></div>
+      <div class="card flip" data-r tabindex="0" role="button" aria-expanded="false"><span>Identity</span><p class="more">Who it is to everything it calls</p></div>
+      <div class="card flip" data-r tabindex="0" role="button" aria-expanded="false"><span>Cleanup</span><p class="more">What gets scrubbed between sessions</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide" data-title="What we tried before Substrate">
+  <h2 data-r>What we tried before Substrate</h2>
+  <div class="body">
+    <div class="four who">
+      <div class="card" data-r><p class="label">Ours</p><p class="name">Homegrown</p></div>
+      <div class="card" data-r><p class="label">Anthropic</p><p class="name">srt</p></div>
+      <div class="card" data-r><p class="label">Kubernetes SIG Apps</p><p class="name">Agent-sandbox</p></div>
+      <div class="card" data-r><p class="label">NVIDIA</p><p class="name">OpenShell</p></div>
+    </div>
+    <p class="verdict" data-r>Each solved part of the problem. None let an idle agent cost nothing.</p>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide" data-title="srt: the right controls at the wrong layer">
+  <p class="kicker" data-r>Anthropic sandbox runtime</p>
+  <h2 data-r>srt: the right controls at the wrong layer</h2>
+  <div class="body">
+    <div class="two">
+      <div class="card" data-r><h3 class="h3g">What it gave us</h3>
+        <ul class="ticks"><li>Filesystem and network limits on any process</li><li>Deny-by-default network via a host proxy</li></ul></div>
+      <div class="card" data-r><h3>Where it fell short</h3>
+        <ul class="ticks minus"><li>Per process on one machine, not a K8s workload</li><li>Shares the host kernel</li></ul></div>
+    </div>
+    <p class="verdict" data-r>Great on a developer laptop, not a multi-tenant platform</p>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide" data-title="Agent-sandbox: isolated, but still a pod">
+  <p class="kicker" data-r>Kubernetes SIG Apps</p>
+  <h2 data-r>Agent-sandbox: isolated, but still a pod</h2>
+  <div class="body">
+    <div class="two">
+      <div class="card" data-r><h3 class="h3g">What it gave us</h3>
+        <ul class="ticks"><li>A stateful pod with a stable identity</li><li>gVisor or Kata isolation</li></ul></div>
+      <div class="card" data-r><h3>Where it fell short</h3>
+        <ul class="ticks minus"><li>One always-on pod per agent</li><li>Idle agents still hold compute</li></ul></div>
+    </div>
+    <p class="verdict" data-r>The isolation was right; the pod was still the unit</p>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide" data-title="OpenShell: keys out of reach, but always on">
+  <p class="kicker" data-r>NVIDIA</p>
+  <h2 data-r>OpenShell: keys out of reach, but always on</h2>
+  <div class="body">
+    <div class="two">
+      <div class="card" data-r><h3 class="h3g">What it gave us</h3>
+        <ul class="ticks"><li>Deny-by-default egress, per binary</li><li>Keys swapped in at the proxy</li></ul></div>
+      <div class="card" data-r><h3>Where it fell short</h3>
+        <ul class="ticks minus"><li>One always-on sandbox per agent</li><li>Egress enforcement runs inside the sandbox</li></ul></div>
+    </div>
+    <p class="verdict" data-r>Its credential model was right, and Substrate kept it</p>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide" data-title="Why we built agent-substrate">
+  <h2 data-r>Why we built agent-substrate</h2>
+  <div class="body">
+    <div class="two reason">
+      <div class="card" data-r><h3>Idle agents hold no compute</h3><p class="sub">Snapshotted to object storage</p></div>
+      <div class="card" data-r><h3>K8s API off the hot path</h3><p class="sub">CRDs for config, its own store for actors</p></div>
+      <div class="card" data-r><h3>Restore in milliseconds</h3><p class="sub">From a snapshot into a warm worker</p></div>
+      <div class="card" data-r><h3>Secure by default</h3><p class="sub">Sandboxed, keyless, default-deny</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 -->
+<section class="slide" data-title="Actors: the unit of compute for the AI era">
+  <h2 data-r>Actors: the unit of compute for the AI era</h2>
+  <div class="body">
+    <div class="row era">
+      <div class="card grow" data-r><p class="label">Data-center era</p><p class="name">Virtual machine</p><p class="sub">Isolates a whole OS</p></div>
+      <div class="arrow" data-r></div>
+      <div class="card grow" data-r><p class="label">Cloud-native era</p><p class="name">Container</p><p class="sub">Packages a stateless service</p></div>
+      <div class="arrow g" data-r></div>
+      <div class="card grow hl ping" data-r><p class="label green">AI era</p><p class="name">Actor</p><p class="sub">Runs one agent session: stateful, sandboxed, idle by default</p></div>
+    </div>
+    <div class="four" data-r>
+      <div class="chip">Its own identity</div><div class="chip">Restores in ms</div>
+      <div class="chip">No compute when idle</div><div class="chip">Always sandboxed</div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 -->
+<section class="slide" data-title="What is agent-substrate?">
+  <h2 data-r>What is agent-substrate?</h2>
+  <div class="body">
+    <div class="sub-diagram" data-r>
+      <div class="row" style="align-items:center;gap:22px;justify-content:center">
+        <div class="node">Client</div>
+        <div class="arrow flow"></div>
+        <div><div class="node">Router</div><p class="note">wakes the actor</p></div>
+        <div class="arrow flow"></div>
+        <div class="pool"><p class="label">Running actors</p>
+          <div class="slots" id="running">
+            <i class="on"></i><i class="on"></i><i></i><i class="on"></i><i></i><i></i>
+            <i class="on"></i><i></i><i></i><i></i><i></i><i></i>
+            <i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i>
+          </div></div>
+        <div class="arrow flow"></div>
+        <div><div class="node">Egress</div><p class="note">adds the API key</p></div>
+        <div class="arrow flow"></div>
+        <div class="node">LLM</div>
+      </div>
+      <div class="vert">
+        <span class="vlabel muted">suspend <span class="vline down"></span></span>
+        <span class="vlabel green"><span class="vline up"></span> restore</span>
+      </div>
+      <div style="display:flex;justify-content:center">
+        <div class="store"><p class="label">Suspended actors</p><div class="slots" id="store"></div></div>
+      </div>
+    </div>
+    <p class="sub" data-r>The router wakes the actor, egress adds the API key, and a suspended actor holds no compute</p>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide" data-title="Configure, compile, converse">
+  <span class="tag" data-r>New in kagent 1.0</span>
+  <h2 data-r>Configure, compile, converse</h2>
+  <div class="body">
+    <div class="flowbox">
+      <p class="fh" data-r style="left:0">1  Configure</p>
+      <p class="fh" data-r style="left:520px">2  Compile</p>
+      <p class="fh" data-r style="left:1000px">3  Converse</p>
+      <div class="fc" data-r style="left:0;top:70px;width:400px;height:150px"><p class="own">Platform team</p><p class="nm">Harness</p><p class="ds">runtime, image, WorkerPool</p></div>
+      <div class="fc" data-r style="left:0;top:300px;width:400px;height:150px"><p class="own">App team</p><p class="nm">AgentTemplate</p><p class="ds">model, prompt, tools</p></div>
+      <div class="fc" data-r style="left:520px;top:70px;width:360px;height:150px"><p class="nm">Agent</p><p class="ds">pairs one of each</p></div>
+      <p class="fl" data-r style="left:716px;top:240px">compiled into</p>
+      <div class="fc hlc" data-r style="left:520px;top:300px;width:360px;height:150px"><p class="nm">ActorTemplate</p><p class="ds">immutable revision</p></div>
+      <p class="fl" data-r style="left:1000px;top:150px">one actor per session</p>
+      <div class="actor" data-r style="top:205px"><i></i><span class="mono">actor 41a</span></div>
+      <div class="actor" data-r style="top:340px"><i></i><span class="mono">actor 7c0</span></div>
+      <div class="actor idle" data-r style="top:475px"><i></i><span class="mono">actor e4b</span><em>suspended</em></div>
+      <svg class="wires" viewBox="0 0 1392 560" aria-hidden="true"><defs><marker id="ah11" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#56FD5A"/></marker></defs>
+        <path class="draw" d="M400 145 H516" marker-end="url(#ah11)"/>
+        <path class="draw" d="M400 375 H460 V145"/>
+        <path class="draw" d="M700 220 V296" marker-end="url(#ah11)"/>
+        <path class="draw" d="M880 375 H996" marker-end="url(#ah11)"/>
+        <path class="draw" d="M940 375 V240 H996" marker-end="url(#ah11)"/>
+        <path class="draw" d="M940 375 V510 H996" marker-end="url(#ah11)"/>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide" data-title="A conversation over A2A">
+  <h2 data-r>A conversation over A2A</h2>
+  <div class="body">
+    <div class="row boxes" style="gap:18px">
+      <div class="node" data-r>Caller<span class="s">names the Agent</span></div>
+      <div class="arrow g" data-r></div>
+      <div class="node" data-r style="border-color:var(--green)">A2A gateway<span class="s">contextId picks the session</span></div>
+      <div class="arrow g" data-r></div>
+      <div class="node" data-r>Actor<span class="s">woken if suspended</span></div>
+    </div>
+    <div data-r>
+      <p class="kicker" style="margin-bottom:16px">One session</p>
+      <div class="lifecycle" id="life">
+        <div class="node">Session<span class="s">pinned revision</span></div><div class="arrow g"></div>
+        <div class="node">Task<span class="s">in progress</span></div><div class="arrow g"></div>
+        <div class="node">Input required<span class="s">waits for a person<span class="dots"></span></span></div><div class="arrow g"></div>
+        <div class="node">Completed<span class="s">actor suspends</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 13 -->
+<section class="slide" data-title="Sandboxes: a safe place to run code">
+  <span class="tag" data-r>New in kagent 1.0</span>
+  <h2 data-r>Sandboxes: a safe place to run code</h2>
+  <div class="body">
+    <div class="flowbox">
+      <p class="fh" data-r style="left:0">1  Define</p>
+      <p class="fh" data-r style="left:520px">2  Create</p>
+      <p class="fh" data-r style="left:1000px">3  Run</p>
+      <div class="fc hlc" data-r style="left:0;top:180px;width:400px;height:190px"><p class="own">Platform team</p><p class="nm">SandboxTemplate</p><p class="ds">tools image, network rules</p></div>
+      <div class="fc" data-r style="left:520px;top:150px;width:360px;height:250px"><p class="own">A person or an agent</p>
+        <p class="way mono">kagent sandbox create</p><p class="way mono">gRPC API</p><p class="way mono">create_sandbox <span>over MCP</span></p></div>
+      <p class="fl" data-r style="left:1000px;top:70px">each in its own gVisor actor</p>
+      <div class="sbx" data-r style="top:125px"><p><b>Sandbox</b> <span>owned by alice</span></p><div class="ttl"><i style="animation-delay:0s"></i></div></div><div class="sbx" data-r style="top:250px"><p><b>Sandbox</b> <span>owned by a CI job</span></p><div class="ttl"><i style="animation-delay:-3s"></i></div></div><div class="sbx" data-r style="top:375px"><p><b>Sandbox</b> <span>owned by an agent</span></p><div class="ttl"><i style="animation-delay:-6s"></i></div></div>
+      <p class="fl" data-r style="left:1000px;top:500px">expires on a timer</p>
+      <svg class="wires" viewBox="0 0 1392 560" aria-hidden="true"><defs><marker id="ah13" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#56FD5A"/></marker></defs>
+        <path class="draw" d="M400 275 H516" marker-end="url(#ah13)"/>
+        <path class="draw" d="M880 275 H996" marker-end="url(#ah13)"/>
+        <path class="draw" d="M940 275 V165 H996" marker-end="url(#ah13)"/>
+        <path class="draw" d="M940 275 V415 H996" marker-end="url(#ah13)"/>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- 14 -->
+<section class="slide" data-title="Secure execution as a service">
+  <h2 data-r>Secure execution as a service</h2>
+  <div class="body">
+    <div class="row" style="gap:26px;align-items:center">
+      <div style="display:grid;gap:26px;flex:1">
+        <div class="node" data-r>gRPC<span class="s">apps and services</span></div>
+        <div class="node" data-r>MCP<span class="s">agents and MCP clients</span></div>
+      </div>
+      <div class="arrow g flow" data-r></div>
+      <div class="card hl" data-r style="flex:1.1;text-align:center;padding:48px 30px">
+        <p class="big" style="font-size:40px;margin-bottom:22px">kagent API</p>
+        <p class="sub" style="color:var(--text)">Every call checked</p>
+        <p class="sub" style="color:var(--text);margin-top:10px">Scoped to its creator</p>
+      </div>
+      <div class="arrow g flow" data-r></div>
+      <div class="guard" data-r style="flex:1.1;padding:48px 30px">
+        <p class="big" style="font-size:40px;margin-bottom:22px">Sandboxes</p>
+        <p class="sub" style="color:var(--text)">gVisor isolated</p>
+        <p class="sub" style="color:var(--text);margin-top:10px">No network by default</p>
+        <p class="sub" style="color:var(--text);margin-top:10px">Expire on a timer</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 15: five lessons, stepped -->
+<section class="slide lz stepped" data-title="Five lessons" data-steps="5">
+  <div class="ltabs" data-r><button class="ltab" data-k="0"><b>1</b>Pausing</button><button class="ltab" data-k="1"><b>2</b>Controls</button><button class="ltab" data-k="2"><b>3</b>Identity</button><button class="ltab" data-k="3"><b>4</b>Stored data</button><button class="ltab" data-k="4"><b>5</b>Runtime</button></div>
+  <div class="lsteps">
+    <div class="step" data-k="0">
+      <h2 data-s>Isolation is table stakes; pausing is the hard part</h2>
+      <div class="cols">
+    <div class="beats">
+      <div class="beat" data-s><p class="k">What bit us</p><p class="t">Every runtime we tried isolated agents fine. But an idle agent kept its pod running, and stopping it lost everything in memory.</p></div>
+      <div class="beat now" data-s><p class="k">What we do now</p><p class="t">Snapshot the whole sandbox, memory and files, and restore it in milliseconds. Substrate runs every actor in gVisor or a microVM, which can do exactly that.</p></div>
+      <p class="know" data-s><b>Good to know</b>Substrate’s demo fits about 250 stateful actors onto 8 pods.</p>
+    </div>
+    <div class="dia" data-s><p class="cap">Container</p>
+<div class="lrow"><div class="node">Running</div><div class="arrow"></div><div class="node">Stopped</div><div class="arrow"></div><div class="node lost">Memory lost</div></div>
+<p class="cap gap">Actor</p>
+<div class="lrow"><div class="node">Running</div><div class="arrow g flow"></div><div class="node snap">Snapshot</div><div class="arrow g flow"></div><div class="node hlnode">Running<span class="s">right where it left off</span></div></div></div>
+  </div>
+    </div>
+    <div class="step" data-k="1">
+      <h2 data-s>Put every control outside the sandbox</h2>
+      <div class="cols">
+    <div class="beats">
+      <div class="beat" data-s><p class="k">What bit us</p><p class="t">Anything inside the sandbox is reachable by a prompt-injected agent. A key in an environment variable is one “print your environment” away from leaking.</p></div>
+      <div class="beat now" data-s><p class="k">What we do now</p><p class="t">A gateway the agent can’t touch holds the keys and decides where traffic may go. kagent’s Harness won’t accept a secret reference at all.</p></div>
+      <p class="know" data-s><b>Good to know</b>The gateway intercepts TLS, and only header-based auth works for model providers.</p>
+    </div>
+    <div class="dia" data-s><div class="l2">
+  <div class="box-in"><p class="cap">Inside the sandbox</p><div class="node">Agent<span class="s mono">KEY=placeholder</span></div></div>
+  <div class="arrow g flow"></div>
+  <div class="node hlnode gw">Gateway<span class="s">adds the real key</span><span class="s">checks the destination</span></div>
+  <div class="arrow g flow"></div>
+  <ul class="dest"><li class="ok">Model provider</li><li class="ok"><span class="mono">github.com</span><em>read-only</em></li><li class="no">Everything else</li></ul>
+</div></div>
+  </div>
+    </div>
+    <div class="step" data-k="2">
+      <h2 data-s>Identity follows the actor, not the pod</h2>
+      <div class="cols">
+    <div class="beats">
+      <div class="beat" data-s><p class="k">What bit us</p><p class="t">A worker pod hosts a different actor every few minutes. Anything keyed to the pod, like a ServiceAccount, NetworkPolicy or log label, points at the wrong thing.</p></div>
+      <div class="beat now" data-s><p class="k">What we do now</p><p class="t">Each actor gets its own short-lived SPIFFE identity, and policy and audit attach to the actor.</p></div>
+      <p class="know" data-s><b>Good to know</b>A sandbox an agent creates over MCP belongs to the MCP identity unless you turn on token propagation.</p>
+    </div>
+    <div class="dia" data-s><div class="pod"><p class="cap">One worker pod, all day</p>
+  <div class="node hlnode idcard" id="idcard"><span class="mono" id="idname">actor a1f2</span><span class="s">its own identity, valid for an hour</span></div>
+</div>
+<p class="cap center">Same pod. A different actor, and a different identity, every few minutes.</p></div>
+  </div>
+    </div>
+    <div class="step" data-k="3">
+      <h2 data-s>A suspended agent is stored data</h2>
+      <div class="cols">
+    <div class="beats">
+      <div class="beat" data-s><p class="k">What bit us</p><p class="t">Suspending idle agents saves a lot of compute. The snapshot left behind holds everything the agent had in memory.</p></div>
+      <div class="beat now" data-s><p class="k">What we do now</p><p class="t">Treat the snapshot bucket like any store of sensitive data: encrypt it, set retention, and decide who can restore.</p></div>
+      <p class="know" data-s><b>Good to know</b>Per-actor snapshot encryption is on Substrate’s roadmap; bucket-level encryption and access controls cover it today.</p>
+    </div>
+    <div class="dia" data-s><div class="l4">
+  <div class="snapfile"><p class="cap">One snapshot holds</p><ul><li>The agent’s memory</li><li>Tool output</li><li>Files it read</li><li>Its working state</li></ul></div>
+  <div class="arrow g"></div>
+  <div class="bucket"><p class="bt">Snapshot bucket</p><div class="bsq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="reqs"><span>Encrypted</span><span>Retention set</span><span>Restore limited</span></div></div>
+</div></div>
+  </div>
+    </div>
+    <div class="step" data-k="4">
+      <h2 data-s>Your sandbox runtime is now a data format</h2>
+      <div class="cols">
+    <div class="beats">
+      <div class="beat" data-s><p class="k">What bit us</p><p class="t">A snapshot only restores on the runtime that wrote it. gVisor even needed a special flag before network connections survived a checkpoint.</p></div>
+      <div class="beat now" data-s><p class="k">What we do now</p><p class="t">Substrate pins the exact gVisor binary into every template and snapshot, and we plan runtime upgrades like schema migrations.</p></div>
+      <p class="know" data-s><b>Good to know</b>You can’t casually bump gVisor under a fleet of suspended agents.</p>
+    </div>
+    <div class="dia" data-s><div class="l5">
+  <div class="snapcol"><p class="cap">Saved agents</p><div class="node tagv">Snapshot<span class="s mono">runtime v1</span></div><div class="node tagv">Snapshot<span class="s mono">runtime v1</span></div></div>
+  <div class="paths">
+    <div class="path ok"><span class="arrow g"></span><div class="node hlnode">Worker<span class="s mono">runtime v1</span></div><b>✓</b></div>
+    <div class="path no"><span class="arrow"></span><div class="node lost">Worker<span class="s mono">runtime v2</span></div><b>✕</b></div>
+  </div>
+</div>
+<p class="cap center">A snapshot restores on the runtime that wrote it.</p></div>
+  </div>
+    </div>
+  </div>
+</section>
+
+<!-- 16: demo tee-up -->
+<section class="slide demo" data-title="Demo: Claude Managed Agents on kagent">
+  <p class="kicker" data-r><span class="live"></span>DEMO</p>
+  <h2 data-r>Claude Managed Agents, running on kagent</h2>
+  <div class="body">
+    <div class="row" style="align-items:center;gap:20px">
+      <div class="card grow" data-r><p class="label">Anthropic</p><p class="dname">Claude Managed Agents</p><p class="sub">runs the agent loop</p></div>
+      <div class="arrow g flow" data-r></div>
+      <div class="node" data-r style="flex:none">Work queue<span class="s">one item per session</span></div>
+      <div class="arrow g flow" data-r></div>
+      <div class="card grow hl" data-r><p class="label green">Your cluster</p><p class="dname">kagent on Substrate</p><p class="sub">runs each session’s tools in its own sandbox</p></div>
+    </div>
+    <div data-r>
+      <p class="watch">Watch for</p>
+      <div class="three"><div class="chip">A sandbox per session</div><div class="chip">Keys stay outside the sandbox</div><div class="chip">Idle sessions pause</div></div>
+    </div>
+  </div>
+</section>
+
+</div></div>
+
+<div id="hud">
+  <button id="prev" aria-label="Previous slide">‹</button>
+  <span class="count" id="count">1 / 22</span>
+  <button id="next" aria-label="Next slide">›</button>
+  <button id="ov" aria-label="Show all slides">▦</button>
+  <button id="fs" aria-label="Toggle full screen">⤢</button>
+</div>
+<p id="help">Arrow keys to move, O for overview, F for full screen</p>
+<nav id="overview" aria-label="All slides"><h4>All slides. Press O or Esc to close.</h4><div class="grid"></div></nav>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const slides = [...document.querySelectorAll('.slide')];
+  const N = slides.length;
+  let cur = 0;
+
+  // stagger index for reveal elements
+  slides.forEach(s => s.querySelectorAll('[data-r]').forEach((el, i) => el.style.setProperty('--i', i)));
+  document.querySelectorAll('.step').forEach(st => st.querySelectorAll('[data-s]').forEach((el, i) => el.style.setProperty('--i', i)));
+  let step = 0;
+  const maxStep = n => (+slides[n].dataset.steps || 1) - 1;
+  function paintSteps(sl, k){
+    sl.querySelectorAll('.step').forEach(st => st.classList.toggle('cur', +st.dataset.k === k));
+    sl.querySelectorAll('.ltab').forEach(t => { t.classList.toggle('cur', +t.dataset.k === k); t.classList.toggle('done', +t.dataset.k < k); });
+  }
+  function setStep(k){
+    if (!slides[cur].dataset.steps) return;
+    step = Math.max(0, Math.min(maxStep(cur), k));
+    paintSteps(slides[cur], step);
+  }
+  const next = () => (slides[cur].dataset.steps && step < maxStep(cur)) ? setStep(step + 1) : go(cur + 1);
+  const prev = () => (slides[cur].dataset.steps && step > 0) ? setStep(step - 1) : go(cur - 1, true, true);
+
+  // scale the 1600x900 stage to the window
+  function fit(){
+    const w = innerWidth, h = innerHeight;
+    const k = Math.min(w / 1600, h / 900);
+    stage.style.transform = `scale(${k})`;
+  }
+  addEventListener('resize', fit); fit();
+
+  const prog = document.getElementById('progress');
+  const count = document.getElementById('count');
+  function go(n, push = true, back = false){
+    n = Math.max(0, Math.min(N - 1, n));
+    if (slides[n].dataset.steps) { step = back ? maxStep(n) : 0; paintSteps(slides[n], step); } else step = 0;
+    slides.forEach((s, i) => {
+      s.classList.toggle('active', i === n);
+      s.classList.toggle('before', i < n);
+      s.setAttribute('aria-hidden', i === n ? 'false' : 'true');
+    });
+    cur = n;
+    prog.style.width = ((n + 1) / N * 100) + '%';
+    count.textContent = `${n + 1} / ${N}`;
+    if (push) history.replaceState(null, '', '#' + (n + 1));
+    document.title = slides[n].dataset.title;
+    markOverview();
+  }
+  const fromHash = () => { const h = parseInt(location.hash.slice(1), 10); return isNaN(h) ? 0 : h - 1; };
+  addEventListener('hashchange', () => go(fromHash(), false));
+
+  // overview
+  const ov = document.getElementById('overview');
+  const grid = ov.querySelector('.grid');
+  slides.forEach((s, i) => {
+    const a = document.createElement('a');
+    a.href = '#' + (i + 1);
+    a.innerHTML = `<b>${i + 1}</b>${s.dataset.title}`;
+    a.addEventListener('click', e => { e.preventDefault(); go(i); toggleOverview(false); });
+    grid.appendChild(a);
+  });
+  function markOverview(){ [...grid.children].forEach((a, i) => a.classList.toggle('cur', i === cur)); }
+  function toggleOverview(force){
+    const open = force ?? !ov.classList.contains('open');
+    ov.classList.toggle('open', open);
+    if (open) grid.children[cur].focus();
+  }
+  function toggleFS(){
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  }
+
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key;
+    if (ov.classList.contains('open')) { if (k === 'Escape' || k === 'o' || k === 'O') toggleOverview(false); return; }
+    if (['ArrowRight','ArrowDown','PageDown',' ','Enter'].includes(k)) { e.preventDefault(); next(); }
+    else if (['ArrowLeft','ArrowUp','PageUp','Backspace'].includes(k)) { e.preventDefault(); prev(); }
+    else if (k === 'Home') go(0);
+    else if (k === 'End') go(N - 1);
+    else if (k === 'f' || k === 'F') toggleFS();
+    else if (k === 'o' || k === 'O') toggleOverview();
+    wake();
+  });
+  document.getElementById('prev').onclick = prev;
+  document.getElementById('next').onclick = next;
+  document.getElementById('ov').onclick = () => toggleOverview();
+  document.getElementById('fs').onclick = toggleFS;
+
+  // click on the slide advances; swipe on touch
+  document.getElementById('viewport').addEventListener('click', e => {
+    if (e.target.closest('button,a,.flip,tbody tr,#field,#pv,li[data-go]')) return;
+    e.clientX < innerWidth * 0.25 ? prev() : next();
+  });
+  let tx = null;
+  addEventListener('touchstart', e => tx = e.touches[0].clientX, {passive:true});
+  addEventListener('touchend', e => {
+    if (tx === null) return;
+    const dx = e.changedTouches[0].clientX - tx;
+    if (Math.abs(dx) > 50) (dx < 0 ? next() : prev());
+    tx = null;
+  });
+
+  // hide chrome when idle
+  const hud = document.getElementById('hud'), help = document.getElementById('help');
+  let idleT;
+  function wake(){
+    hud.classList.remove('idle'); help.classList.remove('idle');
+    clearTimeout(idleT);
+    idleT = setTimeout(() => { hud.classList.add('idle'); help.classList.add('idle'); }, 2600);
+  }
+  addEventListener('mousemove', wake); wake();
+
+  // ---- signature motion: actors waking and suspending ----
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const field = document.getElementById('field');
+  for (let i = 0; i < 12 * 9; i++) field.appendChild(document.createElement('i'));
+  const cells = [...field.children];
+  [5, 18, 41, 66, 79, 93].forEach(i => cells[i].classList.add('on'));
+
+  const store = document.getElementById('store');
+  for (let i = 0; i < 18; i++) store.appendChild(document.createElement('i'));
+  const storeCells = [...store.children];
+
+  if (!reduce) {
+    setInterval(() => {
+      if (!slides[0].classList.contains('active')) return;
+      const on = cells.filter(c => c.classList.contains('on'));
+      if (on.length > 4) on[Math.floor(Math.random() * on.length)].classList.remove('on');
+      cells[Math.floor(Math.random() * cells.length)].classList.add('on');
+    }, 700);
+
+    const running = [...document.querySelectorAll('#running i')];
+    setInterval(() => {
+      if (!slides[9].classList.contains('active')) return;
+      const s = storeCells[Math.floor(Math.random() * storeCells.length)];
+      s.classList.add('wake');
+      setTimeout(() => {
+        s.classList.remove('wake');
+        const free = running.filter(r => !r.classList.contains('on'));
+        const busy = running.filter(r => r.classList.contains('on'));
+        if (free.length) free[Math.floor(Math.random() * free.length)].classList.add('on');
+        if (busy.length > 3) busy[Math.floor(Math.random() * busy.length)].classList.remove('on');
+      }, 650);
+    }, 1600);
+  }
+
+  // title: point at an actor to wake it
+  cells.forEach(c => c.addEventListener('mouseenter', () => {
+    c.classList.add('on');
+    setTimeout(() => c.classList.remove('on'), 2400);
+  }));
+
+  // sandbox dimensions: tap to open on touch screens, Enter/Space for keyboard
+  document.querySelectorAll('.flip').forEach(card => {
+    const t = () => { const o = card.classList.toggle('open'); card.setAttribute('aria-expanded', o); };
+    card.addEventListener('click', t);
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); t(); } });
+  });
+
+  // A2A: walk through one session, lingering on the human step
+  const life = [...document.querySelectorAll('#life .node')];
+  const lifeSlide = document.getElementById('life').closest('.slide');
+  const holds = [1300, 1300, 2600, 1800];
+  let lstep = -1, lifeT;
+  function tick(){
+    if (!lifeSlide.classList.contains('active')) { life.forEach(n => n.classList.remove('now')); lstep = -1; lifeT = setTimeout(tick, 500); return; }
+    lstep = (lstep + 1) % life.length;
+    life.forEach((n, i) => n.classList.toggle('now', i === lstep));
+    lifeT = setTimeout(tick, holds[lstep]);
+  }
+  if (!reduce) lifeT = setTimeout(tick, 1400);
+
+  // lesson 3: the pod stays, the actor and its identity change
+  const idc = document.getElementById('idcard'), idn = document.getElementById('idname');
+  const ids = ['actor a1f2', 'actor 7c09', 'actor e4b1', 'actor 3d5a'];
+  let idi = 0;
+  if (!reduce) setInterval(() => {
+    if (!idc.closest('.slide').classList.contains('active')) return;
+    idc.classList.add('swap');
+    setTimeout(() => { idi = (idi + 1) % ids.length; idn.textContent = ids[idi]; idc.classList.remove('swap'); }, 350);
+  }, 2400);
+
+  // lesson tabs: click to jump between lessons
+  document.querySelectorAll('.ltab').forEach(t => t.addEventListener('click', () => setStep(+t.dataset.k)));
+
+  // last slide: tick the questions off
+  document.querySelectorAll('tbody tr').forEach(tr => tr.addEventListener('click', () => tr.classList.toggle('done')));
+
+  go(fromHash(), false);
+})();
+</script>
+</body>
+</html>

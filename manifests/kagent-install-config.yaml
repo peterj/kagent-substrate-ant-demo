@@ -1,0 +1,5 @@
+install:
+  kagent:
+    repository: oci://ghcr.io/kagent-dev/kagent/helm/
+    version: 0.0.0-alpha.g4de694355985
+    valuesFiles: []

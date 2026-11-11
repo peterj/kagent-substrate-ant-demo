@@ -1,0 +1,22 @@
+registry: ghcr.io
+tag: 0.0.0-alpha.g4de694355985
+config:
+  sandboxes:
+    guestImage: ghcr.io/kagent-dev/kagent/sandbox-guest@sha256:94b1f9e216eee8778797d54b9d6e2b17b74089157d708097577b1479e4d92bd0
+controller:
+  image:
+    pullPolicy: Always
+  env:
+    - name: EXPERIMENTAL_ANTHROPIC_SELF_HOSTED_SANDBOXES_ENABLED
+      value: "true"
+    - name: EXPERIMENTAL_ANTHROPIC_SELF_HOSTED_SANDBOXES_ENVIRONMENT_ID
+      value: ""
+    - name: EXPERIMENTAL_ANTHROPIC_SELF_HOSTED_SANDBOXES_ENVIRONMENT_KEY
+      valueFrom:
+        secretKeyRef:
+          name: anthropic-environment
+          key: environment-key
+    - name: EXPERIMENTAL_ANTHROPIC_SELF_HOSTED_SANDBOXES_TEMPLATE_NAMESPACE
+      value: kagent
+    - name: EXPERIMENTAL_ANTHROPIC_SELF_HOSTED_SANDBOXES_TEMPLATE_NAME
+      value: anthropic-self-hosted-sandbox

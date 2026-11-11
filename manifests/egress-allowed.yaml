@@ -1,0 +1,9 @@
+apiVersion: api.kagent.dev/v1alpha3
+kind: EgressPolicy
+metadata:
+  name: anthropic-managed-agents
+  namespace: kagent
+spec:
+  destinations:
+    - origin: https://*.anthropic.com
+    - origin: https://kagent.dev

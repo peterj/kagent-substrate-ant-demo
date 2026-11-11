@@ -1,0 +1,15 @@
+apiVersion: api.kagent.dev/v1alpha3
+kind: SandboxTemplate
+metadata:
+  name: anthropic-self-hosted-sandbox
+  namespace: kagent
+spec:
+  workload:
+    image: ghcr.io/kagent-dev/kagent/sandbox-guest@sha256:94b1f9e216eee8778797d54b9d6e2b17b74089157d708097577b1479e4d92bd0
+  substrate:
+    workerPoolRef:
+      name: kagent-default
+    snapshotPolicy:
+      location: gs://ate-snapshots/anthropic-managed-agents/
+  egressPolicyRefs:
+    - name: anthropic-managed-agents
